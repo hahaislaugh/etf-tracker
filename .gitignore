@@ -1,0 +1,5 @@
+.DS_Store
+update.log
+__pycache__/
+*.pyc
+.launchd_installed
