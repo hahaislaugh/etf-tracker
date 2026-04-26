@@ -6,24 +6,31 @@ ETF 持股資料自動更新腳本
 支援 ETF：
   00991A  復華台灣未來50 —— GET https://www.fhtrust.com.tw/api/assetsExcel/ETF23/{YYYYMMDD}
   00992A  群益科技創新   —— POST https://www.capitalfund.com.tw/CFWeb/api/etf/buyback
+  00981A  統一台股增長   —— GET https://www.ezmoney.com.tw/ETF/Fund/Info?fundCode=49YTW
 
 使用方式：
   python3 update_data.py            # 下載今天的資料並重新產生 HTML
   python3 update_data.py --dry-run  # 只解析現有檔案，不下載
 """
 
-import os, sys, glob, json, datetime, urllib.request, urllib.error
+import os, sys, glob, json, datetime, urllib.request, urllib.error, http.cookiejar
 import openpyxl
 from zoneinfo import ZoneInfo
 
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-FUHUA_DIR   = os.path.join(SCRIPT_DIR, "復華")
-QUNYI_DIR   = os.path.join(SCRIPT_DIR, "群益")
-HTML_OUT    = os.path.join(SCRIPT_DIR, "index.html")
-TAIPEI_TZ   = ZoneInfo("Asia/Taipei")
+SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+FUHUA_DIR     = os.path.join(SCRIPT_DIR, "復華")
+QUNYI_DIR     = os.path.join(SCRIPT_DIR, "群益")
+UNITRUST_DIR  = os.path.join(SCRIPT_DIR, "統一")
+HTML_OUT      = os.path.join(SCRIPT_DIR, "index.html")
+TAIPEI_TZ     = ZoneInfo("Asia/Taipei")
 
-FUHUA_API   = "https://www.fhtrust.com.tw/api/assetsExcel/ETF23/{date}"
-QUNYI_API   = "https://www.capitalfund.com.tw/CFWeb/api/etf/buyback"
+FUHUA_API     = "https://www.fhtrust.com.tw/api/assetsExcel/ETF23/{date}"
+QUNYI_API     = "https://www.capitalfund.com.tw/CFWeb/api/etf/buyback"
+UNITRUST_URL  = "https://www.ezmoney.com.tw/ETF/Fund/Info?fundCode=49YTW"
+
+os.makedirs(FUHUA_DIR, exist_ok=True)
+os.makedirs(QUNYI_DIR, exist_ok=True)
+os.makedirs(UNITRUST_DIR, exist_ok=True)
 
 
 def taipei_today():
@@ -81,6 +88,63 @@ def fetch_qunyi_api(date_str: str = None) -> list:
     return stocks
 
 
+def fetch_unitrust_ezmoney() -> tuple:
+    """從 ezmoney 頁面擷取 00981A 持股資料。回傳 (date_str, stocks)。
+    date_str 格式: 'YYYY/MM/DD'
+    """
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+    req = urllib.request.Request(
+        UNITRUST_URL,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+    )
+    with opener.open(req, timeout=20) as r:
+        raw = r.read()
+    page = raw.decode("utf-8", errors="replace")
+
+    idx = page.find("DetailCode")
+    if idx < 0:
+        raise ValueError("找不到 DetailCode，頁面格式可能已變更")
+
+    start = max(0, idx - 5000)
+    chunk = page[start:idx + 200]
+    arr_start = chunk.rfind("[{")
+    if arr_start < 0:
+        raise ValueError("找不到 JSON 陣列起點 '[{'")
+
+    raw_chunk = page[start + arr_start:]
+    depth, end = 0, 0
+    for i, ch in enumerate(raw_chunk):
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    if not end:
+        raise ValueError("JSON 陣列括號不匹配")
+
+    json_str = raw_chunk[:end].replace("&quot;", '"').replace("&#34;", '"').replace("&amp;", "&")
+    data = json.loads(json_str)
+
+    stocks = []
+    date_str = ""
+    for d in data:
+        code = str(d.get("DetailCode", "")).strip()
+        if not code or len(code) != 4:
+            continue
+        if not date_str and d.get("TranDate"):
+            date_str = d["TranDate"][:10].replace("-", "/")
+        stocks.append({
+            "code":   code,
+            "name":   str(d.get("DetailName", "")).strip(),
+            "shares": int(d.get("Share", 0)),
+            "weight": round(float(d.get("NavRate", 0)), 4),
+        })
+    return date_str, stocks
+
+
 def download_today():
     today = taipei_today()
     if not is_weekday(today):
@@ -104,13 +168,30 @@ def download_today():
         print(f"  (群益 {today} 已存在，跳過)")
     else:
         try:
-            date_str = today.strftime("%Y/%m/%d")
-            print(f"  📡  群益 API 取得 {date_str}…")
-            stocks = fetch_qunyi_api(date_str)
+            date_api = today.strftime("%Y/%m/%d")
+            print(f"  📡  群益 API 取得 {date_api}…")
+            stocks = fetch_qunyi_api(date_api)
             print(f"  ✓ 取得 {len(stocks)} 檔")
             _save_qunyi_xlsx(stocks, today, qunyi_dest)
         except Exception as e:
             print(f"  ⚠️  群益資料取得失敗：{e}")
+
+    # ── 統一（ezmoney 頁面）──
+    unitrust_dest = os.path.join(UNITRUST_DIR, f"{today.strftime('%Y%m%d')}.json")
+    if os.path.exists(unitrust_dest):
+        print(f"  (統一 {today} 已存在，跳過)")
+    else:
+        try:
+            print(f"  📡  統一 ezmoney 取得…")
+            date_api, stocks = fetch_unitrust_ezmoney()
+            if stocks:
+                with open(unitrust_dest, "w", encoding="utf-8") as f:
+                    json.dump({"date": date_api, "stocks": stocks}, f, ensure_ascii=False)
+                print(f"  ✓ 取得 {len(stocks)} 檔（{date_api}）→ {unitrust_dest}")
+            else:
+                print(f"  ⚠️  統一資料為空")
+        except Exception as e:
+            print(f"  ⚠️  統一資料取得失敗：{e}")
 
 
 def _save_qunyi_xlsx(stocks: list, date: datetime.date, dest: str):
@@ -161,11 +242,9 @@ def parse_fuhua(filepath):
 
 
 def parse_qunyi(filepath):
-    # 從檔名推算日期（例如 24.xlsx → 2026/04/24，或 YYYYMMDD.xlsx）
     basename = os.path.basename(filepath).replace(".xlsx", "")
     try:
         if len(basename) == 8 and basename.isdigit():
-            # YYYYMMDD 格式
             d = datetime.datetime.strptime(basename, "%Y%m%d")
             date_str = d.strftime("%Y/%m/%d")
         else:
@@ -193,8 +272,14 @@ def parse_qunyi(filepath):
     return date_str, stocks
 
 
+def parse_unitrust(filepath):
+    with open(filepath, encoding="utf-8") as f:
+        obj = json.load(f)
+    return obj["date"], obj["stocks"]
+
+
 def load_all_data():
-    fuhua_data, qunyi_data = {}, {}
+    fuhua_data, qunyi_data, unitrust_data = {}, {}, {}
 
     for f in sorted(glob.glob(os.path.join(FUHUA_DIR, "*.xlsx"))):
         try:
@@ -212,73 +297,25 @@ def load_all_data():
         except Exception as e:
             print(f"  ⚠️  解析群益失敗 {f}: {e}")
 
-    return fuhua_data, qunyi_data
+    for f in sorted(glob.glob(os.path.join(UNITRUST_DIR, "*.json"))):
+        try:
+            d, s = parse_unitrust(f)
+            if d:
+                unitrust_data[d] = s
+        except Exception as e:
+            print(f"  ⚠️  解析統一失敗 {f}: {e}")
+
+    return fuhua_data, qunyi_data, unitrust_data
 
 
 # ── 產生 HTML ─────────────────────────────────────────────────────────────
-D981A = [
-    {"code":"2330","name":"台積電","shares":9114000,"weight":9.39},
-    {"code":"2383","name":"台光電","shares":4125000,"weight":8.7},
-    {"code":"2308","name":"台達電","shares":6024000,"weight":5.89},
-    {"code":"3653","name":"健策","shares":2267000,"weight":5.74},
-    {"code":"3017","name":"奇鋐","shares":3902000,"weight":5.42},
-    {"code":"3665","name":"貿聯-KY","shares":4097848,"weight":5.34},
-    {"code":"2345","name":"智邦","shares":5231000,"weight":5.28},
-    {"code":"2368","name":"金像電","shares":7748000,"weight":5.08},
-    {"code":"8046","name":"南電","shares":11881000,"weight":4.9},
-    {"code":"2454","name":"聯發科","shares":3867000,"weight":4.44},
-    {"code":"6223","name":"旺矽","shares":1774000,"weight":3.89},
-    {"code":"3037","name":"欣興","shares":9287000,"weight":3.46},
-    {"code":"5274","name":"信驊","shares":351000,"weight":2.71},
-    {"code":"6669","name":"緯穎","shares":1101000,"weight":2.41},
-    {"code":"2327","name":"國巨","shares":14288000,"weight":2.0},
-    {"code":"3711","name":"日月光投控","shares":7654000,"weight":1.79},
-    {"code":"6515","name":"穎崴","shares":368000,"weight":1.75},
-    {"code":"6805","name":"富世達","shares":1698000,"weight":1.53},
-    {"code":"6510","name":"精測","shares":875000,"weight":1.5},
-    {"code":"6274","name":"台燿","shares":3019000,"weight":1.49},
-    {"code":"2449","name":"京元電子","shares":10503000,"weight":1.42},
-    {"code":"3661","name":"世芯-KY","shares":694000,"weight":1.38},
-    {"code":"3189","name":"景碩","shares":5038000,"weight":1.25},
-    {"code":"2303","name":"聯電","shares":30837000,"weight":1.08},
-    {"code":"8358","name":"金居","shares":5558000,"weight":0.94},
-    {"code":"2317","name":"鴻海","shares":6927000,"weight":0.72},
-    {"code":"8210","name":"勤誠","shares":1051000,"weight":0.6},
-    {"code":"6147","name":"頎邦","shares":7884000,"weight":0.54},
-    {"code":"3443","name":"創意","shares":271000,"weight":0.52},
-    {"code":"2404","name":"漢唐","shares":1091000,"weight":0.51},
-    {"code":"5439","name":"高技","shares":2880000,"weight":0.5},
-    {"code":"3264","name":"欣銓","shares":4896000,"weight":0.48},
-    {"code":"8996","name":"高力","shares":535000,"weight":0.28},
-    {"code":"7769","name":"鴻勁","shares":97000,"weight":0.22},
-    {"code":"6191","name":"精成科","shares":3985000,"weight":0.2},
-    {"code":"2481","name":"強茂","shares":3651000,"weight":0.17},
-    {"code":"3376","name":"新日興","shares":1561000,"weight":0.16},
-    {"code":"3211","name":"順達","shares":916000,"weight":0.16},
-    {"code":"6415","name":"矽力-KY","shares":660000,"weight":0.14},
-    {"code":"4966","name":"譜瑞-KY","shares":370000,"weight":0.11},
-    {"code":"3324","name":"雙鴻","shares":170000,"weight":0.1},
-    {"code":"6488","name":"環球晶","shares":332000,"weight":0.09},
-    {"code":"2313","name":"華通","shares":764000,"weight":0.08},
-    {"code":"3217","name":"優群","shares":780000,"weight":0.07},
-    {"code":"1303","name":"南亞","shares":1373000,"weight":0.06},
-    {"code":"2002","name":"中鋼","shares":5160000,"weight":0.05},
-    {"code":"1319","name":"東陽","shares":508000,"weight":0.02},
-    {"code":"1815","name":"富喬","shares":107000,"weight":0.01},
-    {"code":"2439","name":"美律","shares":15000,"weight":0.0},
-    {"code":"2357","name":"華碩","shares":15000,"weight":0.0},
-    {"code":"4979","name":"華星光","shares":1000,"weight":0.0},
-    {"code":"5347","name":"世界","shares":61000,"weight":0.0},
-]
-
-
-def generate_html(fuhua_data: dict, qunyi_data: dict) -> str:
+def generate_html(fuhua_data: dict, qunyi_data: dict, unitrust_data: dict) -> str:
     now_taipei = datetime.datetime.now(TAIPEI_TZ)
     update_time = now_taipei.strftime("%Y/%m/%d %H:%M 更新")
 
-    fuhua_js  = json.dumps(fuhua_data, ensure_ascii=False)
-    qunyi_js  = json.dumps(qunyi_data, ensure_ascii=False)
-    d981a_js  = json.dumps(D981A, ensure_ascii=False)
+    fuhua_js    = json.dumps(fuhua_data, ensure_ascii=False)
+    qunyi_js    = json.dumps(qunyi_data, ensure_ascii=False)
+    unitrust_js = json.dumps(unitrust_data, ensure_ascii=False)
 
     return f'''<!DOCTYPE html>
 <html lang="zh-TW">
@@ -452,15 +489,35 @@ def generate_html(fuhua_data: dict, qunyi_data: dict) -> str:
     <div class="fund-name">00981A 統一台股增長</div>
     <div class="fund-sub">主動式ETF ｜ 統一投信</div>
   </div>
+  <div class="date-selector">
+    <div class="ds-label">選擇比較日期</div>
+    <div class="ds-row">
+      <select class="ds-select" id="sel981a-from" onchange="render(\'981a\')"></select>
+      <span class="ds-arrow">→</span>
+      <select class="ds-select" id="sel981a-to" onchange="render(\'981a\')"></select>
+    </div>
+    <div class="ds-period" id="period981a"></div>
+  </div>
   <div class="section">
-    <div class="section-title">2026/04/24 完整持股（{len(D981A)} 檔）</div>
-    <div id="full981a" class="holdings-table"></div>
+    <div class="section-title">變動摘要 <span class="section-count" id="cnt981a">—</span></div>
+    <div class="summary-row" id="sum981a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">持股變動明細</div>
+    <div class="change-list" id="chg981a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">完整持股 <button class="toggle-btn" onclick="toggleEl(\'full981a\',this)">展開</button></div>
+    <div id="full981a" class="holdings-table" style="display:none"></div>
   </div>
 </div>
 
 <script>
-const DB = {{ "991a": {fuhua_js}, "992a": {qunyi_js} }};
-const D981A = {d981a_js};
+const DB = {{
+  "991a": {fuhua_js},
+  "992a": {qunyi_js},
+  "981a": {unitrust_js}
+}};
 
 function fmtShares(n) {{ return n.toLocaleString("zh-TW"); }}
 function fmtDate(d) {{ return d.replace("2026/","").replace(/\\/0/g,"/"); }}
@@ -568,9 +625,8 @@ function switchTab(tid) {{
   document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id===tid));
 }}
 
-initSelects("991a"); initSelects("992a");
-render("991a"); render("992a");
-renderFull("981a", D981A);
+initSelects("991a"); initSelects("992a"); initSelects("981a");
+render("991a"); render("992a"); render("981a");
 </script>
 </body>
 </html>'''
@@ -586,12 +642,13 @@ def main():
         download_today()
 
     print("📂  解析現有資料…")
-    fuhua_data, qunyi_data = load_all_data()
+    fuhua_data, qunyi_data, unitrust_data = load_all_data()
     print(f"  復華：{sorted(fuhua_data.keys())}")
     print(f"  群益：{sorted(qunyi_data.keys())}")
+    print(f"  統一：{sorted(unitrust_data.keys())}")
 
     print("🖊️   產生 HTML…")
-    html = generate_html(fuhua_data, qunyi_data)
+    html = generate_html(fuhua_data, qunyi_data, unitrust_data)
     with open(HTML_OUT, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  ✓ 已寫入 {HTML_OUT}")
