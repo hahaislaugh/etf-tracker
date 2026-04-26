@@ -91,13 +91,37 @@
   .fund-meta { background: var(--card); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; border: 1px solid var(--border); }
   .fund-name { font-size: 16px; font-weight: 700; }
   .fund-sub { font-size: 12px; color: var(--sub); margin-top: 3px; }
+
+  .search-wrap { position: relative; margin-bottom: 12px; }
+  .search-input { width: 100%; padding: 10px 40px 10px 14px; border: 1px solid var(--border); border-radius: 12px; font-size: 14px; font-family: inherit; background: var(--card); color: var(--text); outline: none; -webkit-appearance: none; }
+  .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,113,227,0.12); }
+  .search-icon { position: absolute; right: 13px; top: 50%; transform: translateY(-50%); color: var(--sub); pointer-events: none; font-size: 16px; }
+  .search-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; z-index: 50; box-shadow: 0 4px 24px rgba(0,0,0,0.10); }
+  .sr-item { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; font-size: 14px; border-bottom: 1px solid var(--border); }
+  .sr-item:last-child { border-bottom: none; }
+  .sr-item:active { background: var(--bg); }
+  .sr-code { font-size: 12px; color: var(--sub); }
+  .sr-empty { padding: 12px 14px; font-size: 13px; color: var(--sub); text-align: center; }
+
+  .stock-history { background: var(--card); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 12px; overflow: hidden; }
+  .sh-header { padding: 11px 14px; display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid var(--border); }
+  .sh-title { font-size: 14px; font-weight: 700; }
+  .sh-subtitle { font-size: 11px; color: var(--sub); margin-top: 2px; }
+  .sh-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--sub); padding: 0; line-height: 1; margin-left: 8px; flex-shrink: 0; }
+  .sh-row { display: grid; grid-template-columns: 40px 42px 1fr auto auto; gap: 6px; align-items: center; padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  .sh-row:last-child { border-bottom: none; }
+  .sh-date { font-size: 12px; color: var(--sub); font-weight: 500; }
+  .sh-shares { font-size: 13px; font-weight: 500; }
+  .sh-weight { font-size: 13px; font-weight: 700; color: var(--accent); text-align: right; }
+  .sh-diff { font-size: 11px; font-weight: 600; text-align: right; white-space: nowrap; }
+  .sh-none { font-size: 12px; color: var(--sub); font-style: italic; grid-column: 3/-1; }
 </style>
 </head>
 <body>
 
 <header>
   <h1>主動式ETF 持股追蹤</h1>
-  <p>2026/04/26 18:27 更新</p>
+  <p>2026/04/26 22:08 更新</p>
 </header>
 
 <div class="tabs">
@@ -112,6 +136,12 @@
     <div class="fund-name">00991A 復華台灣未來50</div>
     <div class="fund-sub">主動式ETF ｜ 復華投信</div>
   </div>
+  <div class="search-wrap">
+    <input class="search-input" id="srch991a" placeholder="搜尋成分股名稱或代號…" autocomplete="off" oninput="searchStock('991a',this.value)" onblur="hideDropdown('991a')" onfocus="searchStock('991a',this.value)">
+    <span class="search-icon">⌕</span>
+    <div class="search-dropdown" id="drop991a" style="display:none"></div>
+  </div>
+  <div class="stock-history" id="hist991a" style="display:none"></div>
   <div class="date-selector">
     <div class="ds-label">選擇比較日期</div>
     <div class="ds-row">
@@ -141,6 +171,12 @@
     <div class="fund-name">00992A 群益科技創新</div>
     <div class="fund-sub">主動式ETF ｜ 群益投信</div>
   </div>
+  <div class="search-wrap">
+    <input class="search-input" id="srch992a" placeholder="搜尋成分股名稱或代號…" autocomplete="off" oninput="searchStock('992a',this.value)" onblur="hideDropdown('992a')" onfocus="searchStock('992a',this.value)">
+    <span class="search-icon">⌕</span>
+    <div class="search-dropdown" id="drop992a" style="display:none"></div>
+  </div>
+  <div class="stock-history" id="hist992a" style="display:none"></div>
   <div class="date-selector">
     <div class="ds-label">選擇比較日期</div>
     <div class="ds-row">
@@ -170,6 +206,12 @@
     <div class="fund-name">00981A 統一台股增長</div>
     <div class="fund-sub">主動式ETF ｜ 統一投信</div>
   </div>
+  <div class="search-wrap">
+    <input class="search-input" id="srch981a" placeholder="搜尋成分股名稱或代號…" autocomplete="off" oninput="searchStock('981a',this.value)" onblur="hideDropdown('981a')" onfocus="searchStock('981a',this.value)">
+    <span class="search-icon">⌕</span>
+    <div class="search-dropdown" id="drop981a" style="display:none"></div>
+  </div>
+  <div class="stock-history" id="hist981a" style="display:none"></div>
   <div class="date-selector">
     <div class="ds-label">選擇比較日期</div>
     <div class="ds-row">
@@ -304,6 +346,97 @@ function toggleEl(id,btn) {
 function switchTab(tid) {
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.getAttribute("onclick").includes(tid)));
   document.querySelectorAll(".panel").forEach(p=>p.classList.toggle("active",p.id===tid));
+}
+
+// ── 搜尋功能 ────────────────────────────────────────────────────────────
+function searchStock(etfId, query) {
+  const drop = document.getElementById("drop"+etfId);
+  query = query.trim();
+  if(!query) { drop.style.display="none"; return; }
+
+  const allStocks = {};
+  Object.values(DB[etfId]).forEach(list => list.forEach(s => { allStocks[s.code]=s.name; }));
+  const q = query.toLowerCase();
+  const matches = Object.entries(allStocks)
+    .filter(([code,name]) => code.startsWith(q) || name.includes(query))
+    .sort((a,b) => (a[0].startsWith(q)?-1:0)-(b[0].startsWith(q)?-1:0))
+    .slice(0,8);
+
+  if(!matches.length) {
+    drop.innerHTML = '<div class="sr-empty">找不到相符股票</div>';
+  } else {
+    drop.innerHTML = matches.map(([code,name]) =>
+      `<div class="sr-item" onmousedown="showStockHistory('${etfId}','${code}','${name}')">`+
+      `<span>${name}</span><span class="sr-code">${code}</span></div>`
+    ).join("");
+  }
+  drop.style.display = "block";
+}
+
+function hideDropdown(etfId) {
+  setTimeout(() => { document.getElementById("drop"+etfId).style.display="none"; }, 150);
+}
+
+function showStockHistory(etfId, code, name) {
+  document.getElementById("drop"+etfId).style.display = "none";
+  document.getElementById("srch"+etfId).value = name+" "+code;
+
+  const HIST_DAYS = 5;
+  const dates = sortedDates(etfId).slice(-HIST_DAYS);
+  const histEl = document.getElementById("hist"+etfId);
+
+  const rows = dates.map((d, i) => {
+    const s    = (DB[etfId][d]||[]).find(x=>x.code===code);
+    const prev = i>0 ? (DB[etfId][dates[i-1]]||[]).find(x=>x.code===code) : null;
+
+    const shares = s ? s.shares : null;
+    const weight = s ? s.weight : null;
+    const prevShares = prev ? prev.shares : null;
+
+    let op=null, diff=null;
+    if(shares!==null && prevShares===null)      op="add";
+    else if(shares===null && prevShares!==null) op="remove";
+    else if(shares!==null && prevShares!==null) {
+      diff = shares - prevShares;
+      if(diff>0) op="up"; else if(diff<0) op="down"; else op="flat";
+    }
+
+    const dateLabel = fmtDate(d);
+    let badge="", diffHtml="";
+    if(op==="add")    { badge=`<span class="op-badge op-add">建倉</span>`; }
+    else if(op==="remove") { badge=`<span class="op-badge op-remove">清倉</span>`; }
+    else if(op==="up")  { badge=`<span class="op-badge op-up">加碼</span>`; diffHtml=`<span class="sh-diff w-up">+${fmtShares(diff)}</span>`; }
+    else if(op==="down"){ badge=`<span class="op-badge op-down">減碼</span>`; diffHtml=`<span class="sh-diff w-down">${fmtShares(diff)}</span>`; }
+    else if(op==="flat") { badge=`<span class="op-badge" style="background:var(--badge-bg);color:var(--sub)">持平</span>`; }
+    else if(i===0 && shares!==null) { badge=`<span class="op-badge" style="background:var(--badge-bg);color:var(--sub)">首筆</span>`; }
+
+    if(shares===null) {
+      return `<div class="sh-row">
+        <span class="sh-date">${dateLabel}</span>
+        <span></span>
+        <span class="sh-none">未持有</span>
+      </div>`;
+    }
+    return `<div class="sh-row">
+      <span class="sh-date">${dateLabel}</span>
+      ${badge}
+      <span class="sh-shares">${fmtShares(shares)} 股</span>
+      <span class="sh-weight">${weight.toFixed(2)}%</span>
+      ${diffHtml||"<span></span>"}
+    </div>`;
+  });
+
+  histEl.innerHTML =
+    `<div class="sh-header">
+      <div><div class="sh-title">${name}</div><div class="sh-subtitle">${code} ｜ 近 ${dates.length} 個交易日</div></div>
+      <button class="sh-close" onclick="clearStockHistory('${etfId}')">×</button>
+    </div>`+rows.join("");
+  histEl.style.display = "block";
+}
+
+function clearStockHistory(etfId) {
+  document.getElementById("hist"+etfId).style.display = "none";
+  document.getElementById("srch"+etfId).value = "";
 }
 
 initSelects("991a"); initSelects("992a"); initSelects("981a");
