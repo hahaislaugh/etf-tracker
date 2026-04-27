@@ -20,17 +20,19 @@ from zoneinfo import ZoneInfo
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
 FUHUA_DIR     = os.path.join(SCRIPT_DIR, "復華")
 QUNYI_DIR     = os.path.join(SCRIPT_DIR, "群益")
+QUNYI982_DIR  = os.path.join(SCRIPT_DIR, "群益982")
 UNITRUST_DIR  = os.path.join(SCRIPT_DIR, "統一")
+NOMURA_DIR    = os.path.join(SCRIPT_DIR, "野村")
 HTML_OUT      = os.path.join(SCRIPT_DIR, "index.html")
 TAIPEI_TZ     = ZoneInfo("Asia/Taipei")
 
 FUHUA_API     = "https://www.fhtrust.com.tw/api/assetsExcel/ETF23/{date}"
 QUNYI_API     = "https://www.capitalfund.com.tw/CFWeb/api/etf/buyback"
 UNITRUST_URL  = "https://www.ezmoney.com.tw/ETF/Fund/Info?fundCode=49YTW"
+NOMURA_API    = "https://www.nomurafunds.com.tw/API/ETFAPI/api/Fund/GetFundAssets"
 
-os.makedirs(FUHUA_DIR, exist_ok=True)
-os.makedirs(QUNYI_DIR, exist_ok=True)
-os.makedirs(UNITRUST_DIR, exist_ok=True)
+for d in (FUHUA_DIR, QUNYI_DIR, QUNYI982_DIR, UNITRUST_DIR, NOMURA_DIR):
+    os.makedirs(d, exist_ok=True)
 
 
 def taipei_today():
@@ -61,18 +63,19 @@ def download_file(url: str, dest: str) -> bool:
         return False
 
 
-def fetch_qunyi_api(date_str: str = None) -> list:
+def fetch_qunyi_api(date_str: str = None, fund_id: str = "500") -> list:
     """透過群益投信 JSON API 取得完整持股清單。
     date_str: 'YYYY/MM/DD' 格式；None 表示最新日期。
+    fund_id: '500'=00992A, '399'=00982A
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
         "Accept": "application/json, text/plain, */*",
         "Content-Type": "application/json",
-        "Referer": "https://www.capitalfund.com.tw/etf/product/detail/500/portfolio",
+        "Referer": f"https://www.capitalfund.com.tw/etf/product/detail/{fund_id}/portfolio",
         "Origin": "https://www.capitalfund.com.tw",
     }
-    body = json.dumps({"fundId": "500", "date": date_str}).encode()
+    body = json.dumps({"fundId": fund_id, "date": date_str}).encode()
     req = urllib.request.Request(QUNYI_API, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=15) as r:
         j = json.loads(r.read())
@@ -86,6 +89,36 @@ def fetch_qunyi_api(date_str: str = None) -> list:
         "weight": round(float(s["weightRound"]), 4),
     } for s in raw]
     return stocks
+
+
+def fetch_nomura_api(date_str: str = None) -> tuple:
+    """從野村投信 API 取得 00980A 持股資料。回傳 (date_str, stocks)。
+    date_str: 'YYYY/MM/DD'；None 表示最新日期。
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Content-Type": "application/json",
+        "Referer": "https://www.nomurafunds.com.tw/ETFWEB/product-description?fundNo=00980A&tab=Shareholding",
+        "Origin": "https://www.nomurafunds.com.tw",
+    }
+    body = json.dumps({"FundID": "00980A", "SearchDate": date_str}).encode()
+    req = urllib.request.Request(NOMURA_API, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=15) as r:
+        j = json.loads(r.read())
+    if j.get("StatusCode") != 0:
+        raise ValueError(f"野村 API 回傳 StatusCode={j.get('StatusCode')}")
+    data = j["Entries"]["Data"]
+    nav_date = data["FundAsset"]["NavDate"]  # "YYYY/MM/DD"
+    rows = data["Table"][0]["Rows"]
+    if not rows:
+        raise ValueError("野村 API 回傳空資料")
+    stocks = [{
+        "code":   str(r[0]).strip(),
+        "name":   str(r[1]).strip(),
+        "shares": int(str(r[2]).replace(",", "")),
+        "weight": round(float(r[3]), 4),
+    } for r in rows if r[0]]
+    return nav_date, stocks
 
 
 def fetch_unitrust_ezmoney() -> tuple:
@@ -162,19 +195,33 @@ def download_today():
         url = FUHUA_API.format(date=date_str)
         download_file(url, fuhua_dest)
 
-    # ── 群益（JSON API）──
+    # ── 群益 00992A（JSON API）──
     qunyi_dest = os.path.join(QUNYI_DIR, f"{today.strftime('%Y%m%d')}.xlsx")
     if os.path.exists(qunyi_dest):
-        print(f"  (群益 {today} 已存在，跳過)")
+        print(f"  (群益992 {today} 已存在，跳過)")
     else:
         try:
             date_api = today.strftime("%Y/%m/%d")
-            print(f"  📡  群益 API 取得 {date_api}…")
-            stocks = fetch_qunyi_api(date_api)
+            print(f"  📡  群益992 API 取得 {date_api}…")
+            stocks = fetch_qunyi_api(date_api, fund_id="500")
             print(f"  ✓ 取得 {len(stocks)} 檔")
             _save_qunyi_xlsx(stocks, today, qunyi_dest)
         except Exception as e:
-            print(f"  ⚠️  群益資料取得失敗：{e}")
+            print(f"  ⚠️  群益992 資料取得失敗：{e}")
+
+    # ── 群益 00982A（JSON API）──
+    qunyi982_dest = os.path.join(QUNYI982_DIR, f"{today.strftime('%Y%m%d')}.xlsx")
+    if os.path.exists(qunyi982_dest):
+        print(f"  (群益982 {today} 已存在，跳過)")
+    else:
+        try:
+            date_api = today.strftime("%Y/%m/%d")
+            print(f"  📡  群益982 API 取得 {date_api}…")
+            stocks = fetch_qunyi_api(date_api, fund_id="399")
+            print(f"  ✓ 取得 {len(stocks)} 檔")
+            _save_qunyi_xlsx(stocks, today, qunyi982_dest)
+        except Exception as e:
+            print(f"  ⚠️  群益982 資料取得失敗：{e}")
 
     # ── 統一（ezmoney 頁面）──
     unitrust_dest = os.path.join(UNITRUST_DIR, f"{today.strftime('%Y%m%d')}.json")
@@ -192,6 +239,21 @@ def download_today():
                 print(f"  ⚠️  統一資料為空")
         except Exception as e:
             print(f"  ⚠️  統一資料取得失敗：{e}")
+
+    # ── 野村 00980A（JSON API）──
+    nomura_dest = os.path.join(NOMURA_DIR, f"{today.strftime('%Y%m%d')}.json")
+    if os.path.exists(nomura_dest):
+        print(f"  (野村 {today} 已存在，跳過)")
+    else:
+        try:
+            print(f"  📡  野村 API 取得…")
+            date_api, stocks = fetch_nomura_api()
+            if stocks:
+                with open(nomura_dest, "w", encoding="utf-8") as f:
+                    json.dump({"date": date_api, "stocks": stocks}, f, ensure_ascii=False)
+                print(f"  ✓ 取得 {len(stocks)} 檔（{date_api}）→ {nomura_dest}")
+        except Exception as e:
+            print(f"  ⚠️  野村資料取得失敗：{e}")
 
 
 def _save_qunyi_xlsx(stocks: list, date: datetime.date, dest: str):
@@ -279,43 +341,56 @@ def parse_unitrust(filepath):
 
 
 def load_all_data():
-    fuhua_data, qunyi_data, unitrust_data = {}, {}, {}
+    fuhua_data, qunyi_data, qunyi982_data, unitrust_data, nomura_data = {}, {}, {}, {}, {}
 
     for f in sorted(glob.glob(os.path.join(FUHUA_DIR, "*.xlsx"))):
         try:
             d, s = parse_fuhua(f)
-            if d:
-                fuhua_data[d] = s
+            if d: fuhua_data[d] = s
         except Exception as e:
             print(f"  ⚠️  解析復華失敗 {f}: {e}")
 
     for f in sorted(glob.glob(os.path.join(QUNYI_DIR, "*.xlsx"))):
         try:
             d, s = parse_qunyi(f)
-            if d:
-                qunyi_data[d] = s
+            if d: qunyi_data[d] = s
         except Exception as e:
-            print(f"  ⚠️  解析群益失敗 {f}: {e}")
+            print(f"  ⚠️  解析群益992失敗 {f}: {e}")
+
+    for f in sorted(glob.glob(os.path.join(QUNYI982_DIR, "*.xlsx"))):
+        try:
+            d, s = parse_qunyi(f)
+            if d: qunyi982_data[d] = s
+        except Exception as e:
+            print(f"  ⚠️  解析群益982失敗 {f}: {e}")
 
     for f in sorted(glob.glob(os.path.join(UNITRUST_DIR, "*.json"))):
         try:
             d, s = parse_unitrust(f)
-            if d:
-                unitrust_data[d] = s
+            if d: unitrust_data[d] = s
         except Exception as e:
             print(f"  ⚠️  解析統一失敗 {f}: {e}")
 
-    return fuhua_data, qunyi_data, unitrust_data
+    for f in sorted(glob.glob(os.path.join(NOMURA_DIR, "*.json"))):
+        try:
+            d, s = parse_unitrust(f)
+            if d: nomura_data[d] = s
+        except Exception as e:
+            print(f"  ⚠️  解析野村失敗 {f}: {e}")
+
+    return fuhua_data, qunyi_data, qunyi982_data, unitrust_data, nomura_data
 
 
 # ── 產生 HTML ─────────────────────────────────────────────────────────────
-def generate_html(fuhua_data: dict, qunyi_data: dict, unitrust_data: dict) -> str:
+def generate_html(fuhua_data, qunyi_data, qunyi982_data, unitrust_data, nomura_data) -> str:
     now_taipei = datetime.datetime.now(TAIPEI_TZ)
     update_time = now_taipei.strftime("%Y/%m/%d %H:%M 更新")
 
-    fuhua_js    = json.dumps(fuhua_data, ensure_ascii=False)
-    qunyi_js    = json.dumps(qunyi_data, ensure_ascii=False)
-    unitrust_js = json.dumps(unitrust_data, ensure_ascii=False)
+    fuhua_js     = json.dumps(fuhua_data, ensure_ascii=False)
+    qunyi_js     = json.dumps(qunyi_data, ensure_ascii=False)
+    qunyi982_js  = json.dumps(qunyi982_data, ensure_ascii=False)
+    unitrust_js  = json.dumps(unitrust_data, ensure_ascii=False)
+    nomura_js    = json.dumps(nomura_data, ensure_ascii=False)
 
     return f'''<!DOCTYPE html>
 <html lang="zh-TW">
@@ -446,7 +521,9 @@ def generate_html(fuhua_data: dict, qunyi_data: dict, unitrust_data: dict) -> st
 <div class="tabs">
   <div class="tab active" onclick="switchTab(\'t991a\')">00991A<br><small style="font-weight:400;font-size:10px">復華未來50</small></div>
   <div class="tab" onclick="switchTab(\'t992a\')">00992A<br><small style="font-weight:400;font-size:10px">群益科技創新</small></div>
+  <div class="tab" onclick="switchTab(\'t982a\')">00982A<br><small style="font-weight:400;font-size:10px">群益科技高息</small></div>
   <div class="tab" onclick="switchTab(\'t981a\')">00981A<br><small style="font-weight:400;font-size:10px">統一台股增長</small></div>
+  <div class="tab" onclick="switchTab(\'t980a\')">00980A<br><small style="font-weight:400;font-size:10px">野村台灣創新</small></div>
 </div>
 
 <!-- 00991A -->
@@ -519,6 +596,41 @@ def generate_html(fuhua_data: dict, qunyi_data: dict, unitrust_data: dict) -> st
   </div>
 </div>
 
+<!-- 00982A -->
+<div id="t982a" class="panel">
+  <div class="fund-meta">
+    <div class="fund-name">00982A 群益科技高息成長</div>
+    <div class="fund-sub">主動式ETF ｜ 群益投信</div>
+  </div>
+  <div class="search-wrap">
+    <input class="search-input" id="srch982a" placeholder="搜尋成分股名稱或代號…" autocomplete="off" oninput="searchStock(\'982a\',this.value)" onblur="hideDropdown(\'982a\')" onfocus="searchStock(\'982a\',this.value)">
+    <span class="search-icon">⌕</span>
+    <div class="search-dropdown" id="drop982a" style="display:none"></div>
+  </div>
+  <div class="stock-history" id="hist982a" style="display:none"></div>
+  <div class="date-selector">
+    <div class="ds-label">選擇比較日期</div>
+    <div class="ds-row">
+      <select class="ds-select" id="sel982a-from" onchange="render(\'982a\')"></select>
+      <span class="ds-arrow">→</span>
+      <select class="ds-select" id="sel982a-to" onchange="render(\'982a\')"></select>
+    </div>
+    <div class="ds-period" id="period982a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">變動摘要 <span class="section-count" id="cnt982a">—</span></div>
+    <div class="summary-row" id="sum982a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">持股變動明細</div>
+    <div class="change-list" id="chg982a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">完整持股 <button class="toggle-btn" onclick="toggleEl(\'full982a\',this)">展開</button></div>
+    <div id="full982a" class="holdings-table" style="display:none"></div>
+  </div>
+</div>
+
 <!-- 00981A -->
 <div id="t981a" class="panel">
   <div class="fund-meta">
@@ -554,11 +666,48 @@ def generate_html(fuhua_data: dict, qunyi_data: dict, unitrust_data: dict) -> st
   </div>
 </div>
 
+<!-- 00980A -->
+<div id="t980a" class="panel">
+  <div class="fund-meta">
+    <div class="fund-name">00980A 野村台灣創新科技50</div>
+    <div class="fund-sub">主動式ETF ｜ 野村投信</div>
+  </div>
+  <div class="search-wrap">
+    <input class="search-input" id="srch980a" placeholder="搜尋成分股名稱或代號…" autocomplete="off" oninput="searchStock(\'980a\',this.value)" onblur="hideDropdown(\'980a\')" onfocus="searchStock(\'980a\',this.value)">
+    <span class="search-icon">⌕</span>
+    <div class="search-dropdown" id="drop980a" style="display:none"></div>
+  </div>
+  <div class="stock-history" id="hist980a" style="display:none"></div>
+  <div class="date-selector">
+    <div class="ds-label">選擇比較日期</div>
+    <div class="ds-row">
+      <select class="ds-select" id="sel980a-from" onchange="render(\'980a\')"></select>
+      <span class="ds-arrow">→</span>
+      <select class="ds-select" id="sel980a-to" onchange="render(\'980a\')"></select>
+    </div>
+    <div class="ds-period" id="period980a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">變動摘要 <span class="section-count" id="cnt980a">—</span></div>
+    <div class="summary-row" id="sum980a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">持股變動明細</div>
+    <div class="change-list" id="chg980a"></div>
+  </div>
+  <div class="section">
+    <div class="section-title">完整持股 <button class="toggle-btn" onclick="toggleEl(\'full980a\',this)">展開</button></div>
+    <div id="full980a" class="holdings-table" style="display:none"></div>
+  </div>
+</div>
+
 <script>
 const DB = {{
   "991a": {fuhua_js},
   "992a": {qunyi_js},
-  "981a": {unitrust_js}
+  "982a": {qunyi982_js},
+  "981a": {unitrust_js},
+  "980a": {nomura_js}
 }};
 
 function fmtShares(n) {{ return n.toLocaleString("zh-TW"); }}
@@ -758,8 +907,7 @@ function clearStockHistory(etfId) {{
   document.getElementById("srch"+etfId).value = "";
 }}
 
-initSelects("991a"); initSelects("992a"); initSelects("981a");
-render("991a"); render("992a"); render("981a");
+["991a","992a","982a","981a","980a"].forEach(id=>{{ initSelects(id); render(id); }});
 </script>
 </body>
 </html>'''
@@ -775,13 +923,15 @@ def main():
         download_today()
 
     print("📂  解析現有資料…")
-    fuhua_data, qunyi_data, unitrust_data = load_all_data()
-    print(f"  復華：{sorted(fuhua_data.keys())}")
-    print(f"  群益：{sorted(qunyi_data.keys())}")
-    print(f"  統一：{sorted(unitrust_data.keys())}")
+    fuhua_data, qunyi_data, qunyi982_data, unitrust_data, nomura_data = load_all_data()
+    print(f"  復華991：{sorted(fuhua_data.keys())}")
+    print(f"  群益992：{sorted(qunyi_data.keys())}")
+    print(f"  群益982：{sorted(qunyi982_data.keys())}")
+    print(f"  統一981：{sorted(unitrust_data.keys())}")
+    print(f"  野村980：{sorted(nomura_data.keys())}")
 
     print("🖊️   產生 HTML…")
-    html = generate_html(fuhua_data, qunyi_data, unitrust_data)
+    html = generate_html(fuhua_data, qunyi_data, qunyi982_data, unitrust_data, nomura_data)
     with open(HTML_OUT, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"  ✓ 已寫入 {HTML_OUT}")
