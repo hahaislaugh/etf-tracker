@@ -101,7 +101,9 @@ def fetch_nomura_api(date_str: str = None) -> tuple:
         "Referer": "https://www.nomurafunds.com.tw/ETFWEB/product-description?fundNo=00980A&tab=Shareholding",
         "Origin": "https://www.nomurafunds.com.tw",
     }
-    body = json.dumps({"FundID": "00980A", "SearchDate": date_str}).encode()
+    # API 要求 YYYY-MM-DD 格式；None 表示最新
+    api_date = date_str.replace("/", "-") if date_str else None
+    body = json.dumps({"FundID": "00980A", "SearchDate": api_date}).encode()
     req = urllib.request.Request(NOMURA_API, data=body, headers=headers, method="POST")
     with urllib.request.urlopen(req, timeout=15) as r:
         j = json.loads(r.read())
