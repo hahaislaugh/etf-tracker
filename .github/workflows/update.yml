@@ -13,6 +13,10 @@ permissions:
   pages: write
   id-token: write
 
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   update-and-deploy:
     runs-on: ubuntu-latest
@@ -42,6 +46,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add index.html 復華/ 群益/ 群益982/ 統一/ 野村/
           git diff --cached --quiet || git commit -m "chore: 自動更新持股資料 $(TZ=Asia/Taipei date '+%Y/%m/%d %H:%M')"
+          git pull --rebase origin main
           git push
 
       - name: 上傳 Pages 靜態檔案
