@@ -1,10 +1,12 @@
 name: 每日更新 ETF 持股資料
 
 on:
+  push:
+    branches: [main]       # 本機 push 後立即部署
   schedule:
-    # 每天台北時間 22:00 = UTC 14:00（週一到週五）
+    # 每天台北時間 22:00 = UTC 14:00（週一到週五，備援）
     - cron: '0 14 * * 1-5'
-  workflow_dispatch:  # 允許手動觸發
+  workflow_dispatch:       # 允許手動觸發
 
 permissions:
   contents: write
