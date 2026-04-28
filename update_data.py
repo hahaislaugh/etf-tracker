@@ -227,9 +227,16 @@ def download_today():
 
     # ── 統一（ezmoney 頁面）──
     unitrust_dest = os.path.join(UNITRUST_DIR, f"{today.strftime('%Y%m%d')}.json")
+    today_str = today.strftime("%Y/%m/%d")
+    # 若檔案存在但日期不對（早上抓到舊資料），刪掉重抓
     if os.path.exists(unitrust_dest):
-        print(f"  (統一 {today} 已存在，跳過)")
-    else:
+        cached = json.load(open(unitrust_dest, encoding="utf-8"))
+        if cached.get("date") != today_str:
+            os.remove(unitrust_dest)
+            print(f"  (統一 快取日期={cached.get('date')}，重新抓取)")
+        else:
+            print(f"  (統一 {today} 已存在，跳過)")
+    if not os.path.exists(unitrust_dest):
         try:
             print(f"  📡  統一 ezmoney 取得…")
             date_api, stocks = fetch_unitrust_ezmoney()
@@ -244,9 +251,15 @@ def download_today():
 
     # ── 野村 00980A（JSON API）──
     nomura_dest = os.path.join(NOMURA_DIR, f"{today.strftime('%Y%m%d')}.json")
+    # 若檔案存在但日期不對（早上抓到舊資料），刪掉重抓
     if os.path.exists(nomura_dest):
-        print(f"  (野村 {today} 已存在，跳過)")
-    else:
+        cached = json.load(open(nomura_dest, encoding="utf-8"))
+        if cached.get("date") != today_str:
+            os.remove(nomura_dest)
+            print(f"  (野村 快取日期={cached.get('date')}，重新抓取)")
+        else:
+            print(f"  (野村 {today} 已存在，跳過)")
+    if not os.path.exists(nomura_dest):
         try:
             print(f"  📡  野村 API 取得…")
             date_api, stocks = fetch_nomura_api()
